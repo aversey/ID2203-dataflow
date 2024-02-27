@@ -1,4 +1,4 @@
 object Versions {
-  val pekko = "1.0.2"
-  val logback = "1.5.0"
+  val Pekko   = "1.0.2"
+  val Logback = "1.5.0"
 }
