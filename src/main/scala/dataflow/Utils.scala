@@ -1,4 +1,4 @@
-package crdtactor
+package dataflow
 
 import org.slf4j.{Logger => SLLogger}
 import org.slf4j.{LoggerFactory => SLLoggerFactory}

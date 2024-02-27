@@ -1,4 +1,4 @@
-package crdtactor
+package dataflow
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.duration.DurationInt

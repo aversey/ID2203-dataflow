@@ -1,10 +1,9 @@
 # sbt
-project/target
-project/project/target
+project/project/
 target/
 
 # macOS
-*.DS_Store
+.DS_Store
 
 # VS Code
 .idea/
@@ -12,4 +11,4 @@ target/
 .bloop/
 .metals/
 .vscode/
-*metals.sbt
+metals.sbt

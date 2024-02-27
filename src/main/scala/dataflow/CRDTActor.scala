@@ -1,4 +1,4 @@
-package crdtactor
+package dataflow
 
 import org.apache.pekko.actor.typed.scaladsl.ActorContext
 import org.apache.pekko.actor.typed.scaladsl.AbstractBehavior
