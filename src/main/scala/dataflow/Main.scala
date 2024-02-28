@@ -1,31 +1,22 @@
 package dataflow
 
 
-import org.apache.pekko.actor.ActorSystem
-import org.apache.pekko.actor.typed.scaladsl.Behaviors
-import org.apache.pekko.actor.typed.scaladsl.adapter.*
+import dataflow.graph.*
+import dataflow.graph.id
 
 
 def main(args: Array[String]): Unit =
-  val N_ACTORS = 8
+  val graph = Graph("Dataflow")
 
-  val system = ActorSystem("CRDTActor")
+  val a  = graph.newStream[Int]()
+  val ap = graph.newSource(0, x => (x + 1, x), a)
 
-  // Create the actors
-  val actors = (0 until N_ACTORS)
-    .map: i =>
-      val name = s"CRDTActor-$i"
-      val actorRef = system.spawn(
-        Behaviors.setup[CRDTActor.Command] { ctx => new CRDTActor(i, ctx) },
-        name)
-      i -> actorRef
-    .toMap
+  val b  = graph.newStream[String]()
+  val bp = graph.newStatelessTask((x: Int) => (x + 1).toString, Set(a), b)
 
-  // Start the actors
-  actors.foreach((_, actorRef) => actorRef ! CRDTActor.Start(actors))
+  val c  = graph.newStream[String]()
+  val cp = graph.newStatelessTask((x: Int) => (x * 100).toString, Set(a), c)
 
-  // Sleep for a few seconds, then quit :)
-  Thread.sleep(5000)
+  val sink = graph.newStatelessSink((x: String) => println(x), Set(b, c))
 
-  // Force quit
-  System.exit(0)
+  graph.run()
