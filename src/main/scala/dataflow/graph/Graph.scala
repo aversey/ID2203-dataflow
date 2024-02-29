@@ -20,7 +20,9 @@ extension (n: Node)
     case n: Source[?] => n.id
     case n: Task[?]   => n.id
     case n: Sink[?]   => n.id
-  private[graph] def actor(context: ActorContext[Command]): Behavior[Command] =
+  private[graph] def actor(
+    context: ActorContext[FullCommand]
+  ): Behavior[FullCommand] =
     n match
       case n: Source[?] => new SourceActor(n, context)
       case n: Task[?]   => new TaskActor(n, context)
@@ -129,6 +131,8 @@ class Graph(name: String):
     running = true
     val system = ActorSystem(name)
     val actors = nodes.map: n =>
-      system.spawn(Behaviors.setup[Command](ctx => n.actor(ctx)), n.toString)
+      system.spawn(
+        Behaviors.setup[FullCommand](ctx => n.actor(ctx)),
+        n.toString)
 
-    actors.foreach(actorRef => actorRef ! Start(actors))
+    actors.foreach(actorRef => actorRef ! Init(actors))
