@@ -5,6 +5,7 @@ import org.apache.pekko.actor.typed.ActorRef
 import org.apache.pekko.actor.typed.scaladsl.AbstractBehavior
 import org.apache.pekko.actor.typed.scaladsl.ActorContext
 import org.apache.pekko.actor.typed.scaladsl.Behaviors
+import scala.collection.mutable
 
 
 class Source[D] private[graph] (
@@ -21,13 +22,35 @@ private class SourceActor[D](
   source: Source[D],
   context: ActorContext[FullCommand]
 ) extends NodeActor(context):
+  override def toString = source.toString
+
+  val outNodesCredits = mutable.Map[Int, Int]()
+  source.outNodes.foreach: outNode =>
+    outNodesCredits(outNode) = 0
+
   override def onInit() =
-    var data = source.initialData
-    for i <- 0 until 100 do
-      val (newData, res) = source.f(data)
-      data = newData
+    // This is hacky
+    actors(source.id) ! Event(source.outStream, source.initialData)
+
+  var sleepTime = 10
+  override def onCommand(msg: Command): Unit = msg match
+    case msg: Event =>
+      var data = msg.data.asInstanceOf[D]
+      if outNodesCredits.values.forall(_ > 0) then
+        outNodesCredits.mapValuesInPlace((_, x) => x - 1)
+        val (d, res) = source.f(data)
+        data = d
+        source.outNodes.foreach: outNode =>
+          actors(outNode) ! Event(source.outStream, res)
+        sleepTime = 10
+      else
+        Thread.sleep(sleepTime)
+        sleepTime *= 2
+      // This is hacky
+      actors(source.id) ! Event(source.outStream, data)
+    case msg: Border =>
       source.outNodes.foreach: outNode =>
-        actors(outNode) ! Event(source.outStream, res)
-        if i % 10 == 10 - 1 then
-          // TODO: batching
-          actors(outNode) ! Border(source.outStream)
+        actors(outNode) ! Border(source.outStream)
+
+  override def onCredit(msg: Credit): Unit =
+    outNodesCredits(msg.fromNode) += msg.amount

@@ -19,9 +19,12 @@ class NodeActor(context: ActorContext[FullCommand])
         actors = msg.actors
         started = true
         onInit()
+      case msg: Credit =>
+        onCredit(msg)
       case msg: Command =>
         if !started then throw IllegalStateException("Actor not started")
         onCommand(msg)
     Behaviors.same[FullCommand]
   def onInit(): Unit                = ()
+  def onCredit(msg: Credit): Unit   = ()
   def onCommand(msg: Command): Unit = ???

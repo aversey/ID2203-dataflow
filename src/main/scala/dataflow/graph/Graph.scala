@@ -7,6 +7,7 @@ import org.apache.pekko.actor.typed.scaladsl.ActorContext
 import org.apache.pekko.actor.typed.scaladsl.Behaviors
 import org.apache.pekko.actor.typed.scaladsl.adapter.*
 import scala.collection.mutable
+import scala.compiletime.ops.double
 import scala.reflect.Typeable
 
 
@@ -110,10 +111,12 @@ class Graph(name: String):
     check
     val streamConsumers =
       mutable.ArraySeq.make((0 until streams).map(_ => Set[Int]()).toArray)
+    val streamProducer = mutable.Map[Int, Int]()
     for n <- nodes do
       n match
-        case n: Source[?] => ()
+        case n: Source[?] => streamProducer(n.outStream) = n.id
         case n: Task[?] =>
+          streamProducer(n.outStream) = n.id
           n.inStreams.foreach: s =>
             streamConsumers(s) += n.id
         case n: Sink[?] =>
@@ -122,8 +125,10 @@ class Graph(name: String):
     for n <- nodes do
       n match
         case n: Source[?] => n.outNodes = streamConsumers(n.outStream)
-        case n: Task[?]   => n.outNodes = streamConsumers(n.outStream)
-        case n: Sink[?]   => ()
+        case n: Task[?] =>
+          n.outNodes = streamConsumers(n.outStream)
+          n.inNodes = n.inStreams.map(streamProducer)
+        case n: Sink[?] => n.inNodes = n.inStreams.map(streamProducer)
 
   def run() =
     if running then throw IllegalStateException("Graph is already running")
@@ -136,3 +141,9 @@ class Graph(name: String):
         n.toString)
 
     actors.foreach(actorRef => actorRef ! Init(actors))
+
+    val sources = nodes.collect { case s: Source[?] => s }
+    while true do
+      Thread.sleep(1000)
+      sources.foreach: s =>
+        actors(s.id) ! Border(s.outStream)
