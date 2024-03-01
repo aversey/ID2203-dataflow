@@ -22,8 +22,9 @@ private class SinkActor[D](sink: Sink[D], context: ActorContext[FullCommand])
   extends NodeActor(context):
   override def toString = sink.toString
 
-  val barrier = Barrier(sink.inStreams, onEvent, commit)
-  override def onCommand(msg: Command) = barrier.onCommand(msg)
+  val barrier: Barrier = Barrier(sink.inStreams, onEvent, commit)
+  override def onCommand(msg: Command) =
+    barrier.onCommand(() => generation)(msg)
 
   var buffer   = List[Any]()
   var data     = sink.initialData
@@ -31,7 +32,14 @@ private class SinkActor[D](sink: Sink[D], context: ActorContext[FullCommand])
   var consumed = 0
 
   override def onInit(): Unit = sink.inNodes.foreach: inNode =>
-    actors(inNode) ! Credit(sink.id, maxQueue)
+    actors(inNode) ! Credit(generation, sink.id, maxQueue)
+
+  override def recover(e: Int, state: Any): Unit =
+    buffer = List[Any]()
+    data = state.asInstanceOf[D]
+    consumed = 0
+    barrier.recover(e)
+    onInit()
 
   def onEvent(e: Event) =
     buffer :+= e.data
@@ -41,7 +49,7 @@ private class SinkActor[D](sink: Sink[D], context: ActorContext[FullCommand])
       consumed = 0
 
   def commit() =
-    // TODO: commit
+    storage ! Write(generation, sink.id, barrier.epoch, data)
     buffer.foreach: d =>
       data = sink.f(data, d)
     buffer = List()

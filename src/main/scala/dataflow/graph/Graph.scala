@@ -21,6 +21,10 @@ extension (n: Node)
     case n: Source[?] => n.id
     case n: Task[?]   => n.id
     case n: Sink[?]   => n.id
+  private[graph] def initialData: Any = n match
+    case n: Source[?] => n.initialData
+    case n: Task[?]   => n.initialData
+    case n: Sink[?]   => n.initialData
   private[graph] def actor(
     context: ActorContext[FullCommand]
   ): Behavior[FullCommand] =
@@ -139,11 +143,25 @@ class Graph(name: String):
       system.spawn(
         Behaviors.setup[FullCommand](ctx => n.actor(ctx)),
         n.toString)
+    val storage =
+      system.spawn(
+        Behaviors.setup[StorageCommand](ctx =>
+          Storage(actors, nodes.map(_.initialData), ctx)),
+        "Storage")
 
-    actors.foreach(actorRef => actorRef ! Init(actors))
+    actors.foreach(actorRef => actorRef ! Init(actors, storage))
 
     val sources = nodes.collect { case s: Source[?] => s }
-    while true do
-      Thread.sleep(1000)
-      sources.foreach: s =>
-        actors(s.id) ! Border(s.outStream)
+
+    val borderer = new Thread:
+      override def run = while true do
+        Thread.sleep(1000)
+        sources.foreach: s =>
+          actors(s.id) ! Border(0, s.outStream)
+    borderer.start()
+
+    val failurer = new Thread:
+      override def run = while true do
+        Thread.sleep(100)
+        if Math.random() < 1.0 / 100 then storage ! Fail()
+    failurer.start()

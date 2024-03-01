@@ -21,6 +21,8 @@ def main(args: Array[String]): Unit =
 
   graph.run()
 
+  while true do Thread.sleep(1000)
+
 
 var startTime = 0L
 

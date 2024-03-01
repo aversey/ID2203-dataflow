@@ -24,8 +24,9 @@ private class TaskActor[D](task: Task[D], context: ActorContext[FullCommand])
   extends NodeActor(context):
   override def toString = task.toString
 
-  val barrier = Barrier(task.inStreams, onEvent, commit)
-  override def onCommand(msg: Command) = barrier.onCommand(msg)
+  val barrier: Barrier = Barrier(task.inStreams, onEvent, commit)
+  override def onCommand(msg: Command) =
+    barrier.onCommand(() => generation)(msg)
 
   var data     = task.initialData
   val maxQueue = 100
@@ -36,14 +37,21 @@ private class TaskActor[D](task: Task[D], context: ActorContext[FullCommand])
     outNodesCredits(outNode) = 0
 
   override def onInit(): Unit = task.inNodes.foreach: inNode =>
-    actors(inNode) ! Credit(task.id, maxQueue)
+    actors(inNode) ! Credit(generation, task.id, maxQueue)
+
+  override def recover(e: Int, state: Any): Unit =
+    data = state.asInstanceOf[D]
+    outNodesCredits.mapValuesInPlace((_, _) => 0)
+    consumed = 0
+    barrier.recover(e)
+    onInit()
 
   def onEvent(e: Event) =
     if outNodesCredits.values.forall(_ > 0) then
       outNodesCredits.mapValuesInPlace((_, x) => x - 1)
       val (newData, res) = task.f(data, e.data)
       data = newData
-      output(Event(task.outStream, res))
+      output(Event(generation, task.outStream, res))
       consumed += 1
       if consumed == maxQueue then
         onInit()
@@ -53,11 +61,11 @@ private class TaskActor[D](task: Task[D], context: ActorContext[FullCommand])
       actors(task.id) ! e
 
   def commit() =
-    // TODO: commit
-    output(Border(task.outStream))
+    storage ! Write(generation, task.id, barrier.epoch, data)
+    output(Border(generation, task.outStream))
 
   def output(msg: FullCommand) = task.outNodes.foreach: outNode =>
     actors(outNode) ! msg
 
   override def onCredit(msg: Credit): Unit =
-    outNodesCredits(msg.fromNode) += msg.amount
+    outNodesCredits(msg.from) += msg.amount
