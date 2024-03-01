@@ -24,7 +24,7 @@ private class TaskActor[D](task: Task[D], context: ActorContext[FullCommand])
   extends NodeActor(context):
   override def toString = task.toString
 
-  val barrier: Barrier = Barrier(task.inStreams, onEvent, commit)
+  val barrier: Barrier = Barrier(task.inStreams, onEvent, precommit, commit)
   override def onCommand(msg: Command) =
     barrier.onCommand(() => generation)(msg)
 
@@ -60,9 +60,11 @@ private class TaskActor[D](task: Task[D], context: ActorContext[FullCommand])
       Thread.sleep(10)
       actors(task.id) ! e
 
-  def commit() =
+  def precommit() =
     storage ! Write(generation, task.id, barrier.epoch, data)
     output(Border(generation, task.outStream))
+
+  def commit(msg: Commit) = ()
 
   def output(msg: FullCommand) = task.outNodes.foreach: outNode =>
     actors(outNode) ! msg

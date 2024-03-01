@@ -62,6 +62,7 @@ private class SourceActor[D](
       storage ! Write(generation, source.id, epoch, data)
       source.outNodes.foreach: outNode =>
         actors(outNode) ! Border(generation, source.outStream)
+    case msg: Commit => ()
 
   override def onCredit(msg: Credit): Unit =
     outNodesCredits(msg.from) += msg.amount

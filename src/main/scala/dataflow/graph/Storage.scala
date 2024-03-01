@@ -25,13 +25,20 @@ class Storage(
   actors.indices.foreach: i =>
     states(i) = mutable.Map[Int, Any](0 -> initials(i))
   var generation = 0
+  var gce        = 0
   override def onMessage(msg: StorageCommand) =
     msg match
       case msg: Write =>
-        if msg.g == generation then states(msg.n) += (msg.e -> msg.s)
+        if msg.g == generation then
+          states(msg.n) += (msg.e -> msg.s)
+          val newGce = states.map(_._2.maxBy(_._1)._1).min
+          if newGce > gce then
+            gce = newGce
+            states.foreach: (n, a) =>
+              actors(n) ! Commit(generation, gce)
+              a.filterInPlace((e, _) => e >= gce)
       case msg: Fail =>
         generation += 1
-        val gce = states.map(_._2.maxBy(_._1)._1).min
         states.mapValuesInPlace: (n, a) =>
           actors(n) ! Recover(generation, gce, a(gce))
           mutable.Map(gce -> a(gce))

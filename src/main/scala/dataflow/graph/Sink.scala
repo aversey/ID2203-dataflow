@@ -22,12 +22,12 @@ private class SinkActor[D](sink: Sink[D], context: ActorContext[FullCommand])
   extends NodeActor(context):
   override def toString = sink.toString
 
-  val barrier: Barrier = Barrier(sink.inStreams, onEvent, commit)
+  val barrier: Barrier = Barrier(sink.inStreams, onEvent, precommit, commit)
   override def onCommand(msg: Command) =
     barrier.onCommand(() => generation)(msg)
 
-  var buffer   = List[Any]()
-  var data     = sink.initialData
+  var buffer = mutable.ListBuffer[mutable.ListBuffer[Any]](mutable.ListBuffer())
+  var data   = sink.initialData
   val maxQueue = 100
   var consumed = 0
 
@@ -35,21 +35,25 @@ private class SinkActor[D](sink: Sink[D], context: ActorContext[FullCommand])
     actors(inNode) ! Credit(generation, sink.id, maxQueue)
 
   override def recover(e: Int, state: Any): Unit =
-    buffer = List[Any]()
+    buffer.clear()
+    buffer.append(mutable.ListBuffer())
     data = state.asInstanceOf[D]
     consumed = 0
     barrier.recover(e)
     onInit()
 
   def onEvent(e: Event) =
-    buffer :+= e.data
+    buffer.last.append(e.data)
     consumed += 1
     if consumed == maxQueue then
       onInit()
       consumed = 0
 
-  def commit() =
+  def precommit() =
     storage ! Write(generation, sink.id, barrier.epoch, data)
-    buffer.foreach: d =>
+    buffer.append(mutable.ListBuffer())
+
+  def commit(msg: Commit) =
+    buffer.head.foreach: d =>
       data = sink.f(data, d)
-    buffer = List()
+    buffer.dropInPlace(1)

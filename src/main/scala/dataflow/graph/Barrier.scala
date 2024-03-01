@@ -8,7 +8,8 @@ import scala.collection.mutable
 class Barrier(
   inStreams: Set[Int],
   onEvent: Event => Unit,
-  commit: () => Unit
+  precommit: () => Unit,
+  commit: Commit => Unit
 ):
   val buffers        = mutable.Map[Int, List[Command]]()
   var borderReceived = Set[Int]()
@@ -17,6 +18,7 @@ class Barrier(
   def onCommand(g: () => Int)(msg: Command) = msg match
     case msg: Event  => if msg.g == g() then event(msg)
     case msg: Border => if msg.g == g() then border(msg)
+    case msg: Commit => if msg.g == g() then commit(msg)
 
   def recover(e: Int) =
     buffers.clear()
@@ -39,7 +41,7 @@ class Barrier(
       borderReceived += b.from
       if borderReceived.size == inStreams.size then
         epoch += 1
-        commit()
+        precommit()
         borderReceived = Set()
         buffers.mapValuesInPlace: (from, buffer) =>
           buffer
