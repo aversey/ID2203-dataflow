@@ -11,35 +11,27 @@ import scala.collection.mutable
 
 sealed trait StorageCommand
 
-case class Write(g: Int, n: Int, e: Int, s: Any) extends StorageCommand
+case class Write(k: Any, v: Any, r: ActorRef[Unit]) extends StorageCommand
 
-case class Fail() extends StorageCommand
+case class Clear(r: ActorRef[Unit]) extends StorageCommand
+
+case class Read(k: Any, r: ActorRef[Any]) extends StorageCommand
 
 
+/* Assumed not to fail, local for each task */
 class Storage(
-  actors: List[ActorRef[FullCommand]],
-  initials: List[Any],
+  initial: Map[Any, Any],
   context: ActorContext[StorageCommand]
 ) extends AbstractBehavior[StorageCommand](context):
-  val states = mutable.Map[Int, mutable.Map[Int, Any]]()
-  actors.indices.foreach: i =>
-    states(i) = mutable.Map[Int, Any](0 -> initials(i))
-  var generation = 0
-  var gce        = 0
+  val storage = mutable.Map[Any, Any](initial.toSeq*)
   override def onMessage(msg: StorageCommand) =
     msg match
       case msg: Write =>
-        if msg.g == generation then
-          states(msg.n) += (msg.e -> msg.s)
-          val newGce = states.map(_._2.maxBy(_._1)._1).min
-          if newGce > gce then
-            gce = newGce
-            states.foreach: (n, a) =>
-              actors(n) ! Commit(generation, gce)
-              a.filterInPlace((e, _) => e >= gce)
-      case msg: Fail =>
-        generation += 1
-        states.mapValuesInPlace: (n, a) =>
-          actors(n) ! Recover(generation, gce, a(gce))
-          mutable.Map(gce -> a(gce))
+        storage(msg.k) = msg.v
+        msg.r ! ()
+      case msg: Clear =>
+        storage.clear()
+        msg.r ! ()
+      case msg: Read =>
+        msg.r ! storage(msg.k)
     Behaviors.same[StorageCommand]

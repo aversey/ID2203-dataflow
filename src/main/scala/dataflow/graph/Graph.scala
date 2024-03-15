@@ -87,20 +87,33 @@ class Graph(name: String):
   ): Task[?] =
     newTask((), (_, x: I) => ((), f(x)), inStreams, outStream)
 
-  def newSink[D, I: Typeable](
+  def newEpochSink[D, I: Typeable](
     d: D,
-    f: (D, I) => D,
+    event: (D, I) => D,
+    epoch: D => D,
     inStreams: Set[Stream[I]]
   ): Sink[?] =
     if running then throw IllegalStateException("Graph is already running")
     streamsWithConsumers |= inStreams.map(_.id)
     newNode(
-      Sink(nodes.length, d, { case (d, x: I) => f(d, x) }, inStreams.map(_.id)))
-  def newStatelessSink[I: Typeable](
-    f: I => Unit,
+      Sink(
+        nodes.length,
+        d,
+        { case (d, x: I) => event(d, x) },
+        epoch,
+        inStreams.map(_.id)))
+  def newSink[D, I: Typeable](
+    d: D,
+    event: (D, I) => D,
     inStreams: Set[Stream[I]]
   ): Sink[?] =
-    newSink((), (_, x: I) => f(x), inStreams)
+    newEpochSink(d, event, d => d, inStreams)
+  def newStatelessSink[I: Typeable](
+    event: I => Unit,
+    epoch: () => Unit,
+    inStreams: Set[Stream[I]]
+  ): Sink[?] =
+    newSink((), (_, x: I) => event(x), inStreams)
 
   // Packing /////////////////////////////////////////////////////////////////
   def check =
@@ -143,25 +156,20 @@ class Graph(name: String):
       system.spawn(
         Behaviors.setup[FullCommand](ctx => n.actor(ctx)),
         n.toString)
-    val storage =
+    val storages = nodes.map: n =>
       system.spawn(
         Behaviors.setup[StorageCommand](ctx =>
-          Storage(actors, nodes.map(_.initialData), ctx)),
-        "Storage")
-
-    actors.foreach(actorRef => actorRef ! Init(actors, storage))
-
+          Storage(Map(-1 -> n.initialData), ctx)),
+        "Storage_of_" + n.toString)
     val sources = nodes.collect { case s: Source[?] => s }
+    val coordinator = system.spawn(
+      Behaviors.setup[CoordinatorCommand](ctx =>
+        Coordinator(actors, sources, ctx)),
+      "Coordinator")
 
-    val borderer = new Thread:
-      override def run = while true do
-        Thread.sleep(1000)
-        sources.foreach: s =>
-          actors(s.id) ! Border(0, s.outStream)
-    borderer.start()
+    actors
+      .zip(storages)
+      .foreach((actorRef, storage) =>
+        actorRef ! Init(actors, storage, coordinator))
 
-    val failurer = new Thread:
-      override def run = while true do
-        Thread.sleep(100)
-        if Math.random() < 1.0 / 100 then storage ! Fail()
-    failurer.start()
+    coordinator

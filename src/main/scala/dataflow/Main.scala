@@ -3,35 +3,72 @@ package dataflow
 
 import dataflow.graph.*
 import dataflow.graph.id
+import scala.collection.mutable
 
 
 def main(args: Array[String]): Unit =
+  if args.length != 1 && args.length != 2 then
+    System.err.println("Usage: dataflow.Main <example> [errorRate]")
+    System.exit(1)
+  var errors = 1.0
+  if args.length == 2 then
+    errors = args(1).toDouble
+    if errors <= 0.0 || errors > 100.0 then
+      System.err.println("Error rate must be in (0, 100]")
+      System.exit(1)
   val graph = Graph("Dataflow")
+  args(0) match
+    case "simple" =>
+      val a = graph.newStream[Event]()
+      benchmarkSource(graph, a)
 
-  val a  = graph.newStream[Int]()
-  val ap = graph.newSource(0, x => (x + 1, x), a)
+      val b = graph.newStream[Event]()
+      benchmarkStatelessTask(graph, noop, Set(a), b)
 
-  val b  = graph.newStream[String]()
-  val bp = graph.newStatelessTask((x: Int) => (x + 1).toString, Set(a), b)
+      benchmarkSink(graph, 1, Set(b))
+    case "basic" =>
+      val a = graph.newStream[Event]()
+      benchmarkSource(graph, a)
 
-  val c  = graph.newStream[String]()
-  val cp = graph.newStatelessTask((x: Int) => (x * 100).toString, Set(a), c)
+      val b = graph.newStream[Event]()
+      benchmarkStatelessTask(graph, noop, Set(a), b)
 
-  val sink = graph.newSink(-1, throughput, Set(b, c))
+      val c = graph.newStream[Event]()
+      benchmarkStatelessTask(graph, noop, Set(a), c)
 
-  graph.run()
+      val d = graph.newStream[Event]()
+      benchmarkStatelessTask(graph, noop, Set(b, c), d)
 
-  while true do Thread.sleep(1000)
+      val e = graph.newStream[Event]()
+      benchmarkStatelessTask(graph, noop, Set(a, b, d), e)
 
+      val f = graph.newStream[Event]()
+      benchmarkStatelessTask(graph, noop, Set(e), f)
 
-var startTime = 0L
+      benchmarkSink(graph, 4, Set(f))
+    case "wide" =>
+      val a = graph.newStream[Event]()
+      benchmarkSource(graph, a)
 
+      var tasks = Set[Stream[Event]]()
+      for i <- 1 to 10 do
+        val b = graph.newStream[Event]()
+        benchmarkStatelessTask(graph, noop, Set(a), b)
+        tasks += b
 
-def throughput(count: Int, x: String): Int =
-  if count == -1 then startTime = System.currentTimeMillis()
-  if count % 1000 == 1000 - 1 then
-    val endTime = System.currentTimeMillis()
-    val time    = endTime - startTime
-    val rate    = count.toDouble / time * 1000
-    println(rate)
-  count + 1
+      benchmarkSink(graph, 10, tasks)
+    case "tall" =>
+      val a = graph.newStream[Event]()
+      benchmarkSource(graph, a)
+
+      var old = a
+      for i <- 1 to 10 do
+        val b = graph.newStream[Event]()
+        benchmarkStatelessTask(graph, noop, Set(old), b)
+        old = b
+
+      benchmarkSink(graph, 1, Set(old))
+    case _ =>
+      System.err.println(s"Unknown example ${args(0)}")
+      System.exit(1)
+  withFailures(graph.run(), errors)

@@ -4,8 +4,10 @@ package dataflow.graph
 import org.apache.pekko.actor.typed.ActorRef
 import org.apache.pekko.actor.typed.scaladsl.AbstractBehavior
 import org.apache.pekko.actor.typed.scaladsl.ActorContext
+import org.apache.pekko.actor.typed.scaladsl.AskPattern.Askable
 import org.apache.pekko.actor.typed.scaladsl.Behaviors
 import scala.collection.mutable
+import scala.concurrent.ExecutionContext.Implicits.global
 
 
 class Source[D] private[graph] (
@@ -31,38 +33,42 @@ private class SourceActor[D](
   var data = source.initialData
   override def onInit() =
     // This is hacky
-    actors(source.id) ! Event(generation, source.outStream, ())
+    actors(source.id) ! event(source.outStream, ())
 
   override def recover(e: Int, state: Any): Unit =
     data = state.asInstanceOf[D]
     epoch = e
+    sleepTime = 10
     outNodesCredits.mapValuesInPlace((_, _) => 0)
     onInit()
 
   var epoch     = 0
   var sleepTime = 10
   override def onCommand(msg: Command): Unit = msg match
-    case msg: Event =>
-      if msg.g == generation then
-        if outNodesCredits.values.forall(_ > 0) then
-          outNodesCredits.mapValuesInPlace((_, x) => x - 1)
-          val (d, res) = source.f(data)
-          data = d
-          source.outNodes.foreach: outNode =>
-            actors(outNode) ! Event(generation, source.outStream, res)
-          sleepTime = 10
-        else
-          Thread.sleep(sleepTime)
-          sleepTime *= 2
-        // This is hacky
-        actors(source.id) ! Event(generation, source.outStream, ())
-    case msg: Border =>
-      // source recieves only fake borders, no need for generation checks
+    case _: Event =>
+      if outNodesCredits.values.forall(_ > 0) then
+        outNodesCredits.mapValuesInPlace((_, x) => x - 1)
+        val (d, res) = source.f(data)
+        data = d
+        output(event(source.outStream, res))
+        sleepTime = 10
+      else
+        Thread.sleep(sleepTime)
+        sleepTime += 5
+      // This is hacky
+      actors(source.id) ! event(source.outStream, ())
+    case _: Border =>
       epoch += 1
-      storage ! Write(generation, source.id, epoch, data)
-      source.outNodes.foreach: outNode =>
-        actors(outNode) ! Border(generation, source.outStream)
-    case msg: Commit => ()
+      val pc = precommit(source.id, epoch)
+      storage
+        .ask(r => Write(epoch, data, r))
+        .onComplete(_ => coordinator ! pc)
+      output(border(source.outStream))
+      sleepTime = 10
+    case _: Commit => ()
+
+  def output(msg: FullCommand) = source.outNodes.foreach: outNode =>
+    actors(outNode) ! msg
 
   override def onCredit(msg: Credit): Unit =
     outNodesCredits(msg.from) += msg.amount
